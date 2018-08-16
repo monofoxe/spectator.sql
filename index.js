@@ -113,8 +113,9 @@ fetchAdverts();
 const updateTimer = setInterval(() => {
 	console.log(`Timer says: "It's time to update!".`);
 	fetchAdverts();
-	console.log(`Timer says: "Data was updated. See you later!"`):
+	console.log(`Timer says: "Data was updated. See you later!"`);
 }, EXPIRES_INTERVAL);
+
 
 /**
  * Loads, compares, if it is need sends to client new adverts data.
@@ -133,11 +134,11 @@ function fetchAdverts(isClientRequest=false) {
 			 * and compare adverts.
 			 */
 			console.log('Unable to restore adverts data, load it from' +
-						' MySQL-database.'):
+						' MySQL-database.');
 			const connection = mysql.createConnection(account);
 			connection.connect();
 
-			const reqest = `SELECT id, price, s, contact FROM items`;
+			const request = `SELECT id, price, s, contact FROM items`;
 			connection.query(request, (error, data) => {
 				if (error) {
 					if (isClientRequest) {
@@ -157,6 +158,7 @@ function fetchAdverts(isClientRequest=false) {
 				/**
 				 * Compare adverts & save new data.
 				 */
+				console.log('Data was sucessully loaded.');
 				const compared = JSON.stringify(compareAdverts(data));
 				fs.writeFileSync('posted.json', compared);
 				if (isClientRequest) {
@@ -189,7 +191,12 @@ function fetchAdverts(isClientRequest=false) {
 function compareAdverts(collection) {
 	let results = {};
 
+	let compared = 0;
+
+	const startTime = Date.now();
+
 	if (collection instanceof Array) {
+		console.log('Starting to compare...');
 		collection.forEach(advert => {
 			/**
 			 * Create a new cell for each advert.
@@ -198,10 +205,26 @@ function compareAdverts(collection) {
 				results[advert.id] = [];
 			}
 			/**
-			 * Create a copy of adverts collection, without current advert.
+			 * Create a copy of adverts collection, remove current advert
+			 * and all adverts, that was compared with current.
 			 */
 			const copy = [...collection];
-			copy.splice(copy.indexOf(advert), 1);
+			const currentIndex = copy.indexOf(advert);
+			copy.splice(currentIndex);
+			results[adverts.id].forEach(_compared => {
+				if (_compared.hasOwnProperty('with')) {
+					/**
+					 * Find advert with the id.
+					 */
+					for (let _advert of copy) {
+						if (_advert.id === _compared.with) {
+							const index = copy.indexOf(_advert);
+							copy.splice(index, 1);
+							break;
+						}
+					}
+				}
+			});
 			/**
 			 * Compare advert with others.
 			 */
@@ -274,12 +297,17 @@ function compareAdverts(collection) {
 					results[i.id].push({
 						with: j.id,
 						for: similarity
-					})
+					});
 				}
+				compared++;
+				console.log(`Compared ${compared}`);
 			});
 		});
 	}
 
+	console.log(`Adverts were compared. \n` +
+				`Operation counts: ${compared}. \n` +
+				`Time: ${Date.now() - startTime}ms. \n`);
 	return results;
 }
 /**
