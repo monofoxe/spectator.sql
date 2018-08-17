@@ -66,7 +66,7 @@ let readyState = 'loading';
  * Expire time adverts data interval.
  * @type {number}
  */
-const EXPIRES_INTERVAL = 24 * 60 * 60;
+const EXPIRES_INTERVAL = 24 * 60 * 60 * 1000;
 /**
  * @const
  * MySQL-database account data.s
@@ -78,11 +78,49 @@ const account = {
 	password: '123456',
 	database: 'items'
 };
+/**
+ */
+const secureKey = 'hiworld';
 
 /**
- * Load all files from './public' directory.
+ * Express routing: API.
  */
-app.use(express.static(path.join(__dirname, 'public')));
+app.get('/posted.json', (request, response) => {
+	fs.readFile('posted.json', 'utf-8', (error, _response) => {
+		if (error) {
+			const error = {
+				code: 0x01,
+				description: 'Adverts had not compared yet, try again later.'
+			};
+			response.end(JSON.stringify(error, null, 4));
+			return;
+		};
+		response.send(_response);
+	});
+});
+app.get('/api/:method/:key/?:data', (request, response) => {
+	const { key, method, data } = request.params;
+	if (key === secureKey) {
+		switch(method) {
+			case 'get':
+				fs.readFile('./posted.json', 'utf-8', (error, _response) => {
+					if (error) {
+						const error = {
+							code: 0x01,
+							description: 'Adverts had not compared yet, try' +
+										 ' again later.'
+						};
+						response.end(JSON.stringify(error, null, 4));
+						return;
+					}
+					const compressed = JSON.parse(_response).content;
+					response.send(JSON.stringify(compressed[data]));
+				});
+			break;
+		}
+	}
+});
+
 /**
  * Start the server.
  */
@@ -116,7 +154,6 @@ const updateTimer = setInterval(() => {
 	console.log(`Timer says: "Data was updated. See you later!"`);
 }, EXPIRES_INTERVAL);
 
-
 /**
  * Loads, compares, if it is need sends to client new adverts data.
  * @param {object|boolean} [isClientRequest] - Client address, if need to send 
@@ -126,7 +163,7 @@ function fetchAdverts(isClientRequest=false) {
 	/**
 	 * Try to restore adverts data from file system.
 	 */
-	fs.readFile('posted.json', 'utf-8', (error, response) => {
+	fs.readFile('./posted.json', 'utf-8', (error, response) => {
 		if (error ||
 			JSON.parse(response).timeout + EXPIRES_INTERVAL < Date.now()) {
 			/**
@@ -145,7 +182,7 @@ function fetchAdverts(isClientRequest=false) {
 						isClientRequest.emit('break', 
 											 factory.UNEXPECTED_SQL_ERROR);
 					} else {
-						fs.writeFileSync('./public/posted.json',
+						fs.writeFileSync('./posted.json',
 										 JSON.stringify({
 										 	 state: false,
 										 	 description: UNEXPECTED_SQL_ERROR
@@ -159,14 +196,14 @@ function fetchAdverts(isClientRequest=false) {
 				 * Compare adverts & save new data.
 				 */
 				console.log('Data was sucessully loaded.');
-				const compared = JSON.stringify(compareAdverts(data));
-				fs.writeFileSync('posted.json', compared);
+				const compared = compareAdverts(data);
+				fs.writeFileSync('posted.json', JSON.stringify({
+					timeout: Date.now(),
+					content: compared
+				}, null, 4));
 				if (isClientRequest) {
 					socket.emit('post', compared);
-				} else {
-					fs.writeFileSync('./public/posted.json',
-									 compared);
-				};
+				}
 				console.log('Data was sucessfully updated.');
 			});
 			connection.end();
@@ -191,7 +228,7 @@ function fetchAdverts(isClientRequest=false) {
 function compareAdverts(collection) {
 	let results = {};
 
-	let compared = 0;
+	let operationsCount = 0;
 
 	const startTime = Date.now();
 
@@ -211,7 +248,7 @@ function compareAdverts(collection) {
 			const copy = [...collection];
 			const currentIndex = copy.indexOf(advert);
 			copy.splice(currentIndex);
-			results[adverts.id].forEach(_compared => {
+			results[advert.id].forEach(_compared => {
 				if (_compared.hasOwnProperty('with')) {
 					/**
 					 * Find advert with the id.
@@ -228,7 +265,7 @@ function compareAdverts(collection) {
 			/**
 			 * Compare advert with others.
 			 */
-			copy.forEach(second => {
+			for (let second of copy) {
 				let i = advert, j = second;
 				/**
 				 * Translate phone numbers and place into numbers.
@@ -239,6 +276,13 @@ function compareAdverts(collection) {
 				j.s = Number(String(j.s).replace(/[м2\s]*/gim, ''));
 		
 				
+				if (j.contact !== i.contact && 
+					Math.abs(j.price - i.price) >= 0.1 * Math.min(j.s, i.s) &&
+					j.s - i.s > 10)
+				{
+					continue;
+				}
+
 				let similarity = 0;
 
 				if (!results.hasOwnProperty(j.id)) {
@@ -284,6 +328,10 @@ function compareAdverts(collection) {
 					}
 				}
 
+				if (similarity === 0) {
+					continue;
+				}
+
 				/**
 				 * Saving the result.
 				 */		
@@ -299,14 +347,13 @@ function compareAdverts(collection) {
 						for: similarity
 					});
 				}
-				compared++;
-				console.log(`Compared ${compared}`);
-			});
+				operationsCount++;
+			}
 		});
 	}
 
 	console.log(`Adverts were compared. \n` +
-				`Operation counts: ${compared}. \n` +
+				`Operation counts: ${operationsCount}. \n` +
 				`Time: ${Date.now() - startTime}ms. \n`);
 	return results;
 }
