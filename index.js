@@ -83,37 +83,26 @@ const account = {
 const secureKey = 'hiworld';
 
 /**
- * Express routing: API.
+ * Router. 
  */
 app.get('/posted.json', (request, response) => {
-	fs.readFile('posted.json', 'utf-8', (error, _response) => {
-		if (error) {
-			const error = {
-				code: 0x01,
-				description: 'Adverts had not compared yet, try again later.'
-			};
-			response.end(JSON.stringify(error, null, 4));
-			return;
-		};
-		response.send(_response);
-	});
+	expressComparedRouting(response, true);
 });
 app.get('/api/:method/:key/?:data', (request, response) => {
 	const { key, method, data } = request.params;
 	if (key === secureKey) {
 		switch(method) {
 			case 'get':
-				fs.readFile('./posted.json', 'utf-8', (error, _response) => {
-					if (error) {
-						const error = {
-							code: 0x01,
-							description: 'Adverts had not compared yet, try' +
-										 ' again later.'
-						};
-						response.end(JSON.stringify(error, null, 4));
-						return;
-					}
-					const compressed = JSON.parse(_response).content;
+				if (!data || isNaN(data)) {
+					const _error = {
+						code: 0x02,
+						description: 'Invalid advert data, expected for number.'
+					};
+					response.end(JSON.stringify(_error));
+					return;
+				}
+				expressComparedRouting(response, _data => {
+					const compressed = JSON.parse(_data).content;
 					response.send(JSON.stringify(compressed[data]));
 				});
 			break;
@@ -125,24 +114,6 @@ app.get('/api/:method/:key/?:data', (request, response) => {
  * Start the server.
  */
 server.listen(location);
-io.on('connection', socket => {
-	if (maintenance) {
-		socket.emit('break', factory.MAINTENANCE);
-		return;
-	}
-	if (peers.length < limit) {
-		peers.push(socket);
-		socket.emit('disconnect', () => {
-			const index = peers.indexOf(socket);
-			peers.splice(index, 1);
-		});
-		socket.on('get', () => {
-			fetchAdverts(socket);
-		});
-	} else {
-		socket.emit('break', factory.USER_LIMIT);
-	}
-});
 
 /** 
  * Load adverts data & start new timer to automaticly update it.
@@ -371,4 +342,28 @@ function isElementComparedWith(element, comparedWithId) {
 		}
 	}
 	return false;
+}
+/**
+ * Read compared adverts data.
+ * @param {object} response - Routing response.
+ * @param {boolean|function} callback - Callback function or expression for it.
+ * @access private
+ */
+function expressComparedRouting(response, callback) {
+	fs.readFile('./posted.json', 'utf-8', (error, _response) => {
+		if (error) {
+			const _error = {
+				code: 0x01,
+				description: 'Adverts had not compared yet, try' +
+							 ' again later.'
+			};
+			response.end(JSON.stringify(_error));
+			return;
+		}
+		if (callback === true) {
+			response.send(_response);
+		} else if (typeof callback === 'function') {
+			callback(_response);
+		}
+	});
 }
